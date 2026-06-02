@@ -37,8 +37,7 @@ import (
 func TestTrainer_PlatformObjectContract(t *testing.T) {
 	obj := &Trainer{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "default-trainer",
-			Namespace: "opendatahub",
+			Name: "default-trainer",
 		},
 		Spec: TrainerSpec{
 			ManagementState: common.Managed,
