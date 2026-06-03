@@ -25,18 +25,23 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+	admissionv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/opendatahub-io/odh-platform-utilities/api/common"
 	"github.com/opendatahub-io/odh-platform-utilities/pkg/cluster"
@@ -58,6 +63,7 @@ const (
 
 	trainerKubeflowGroup   = "trainer.kubeflow.org"
 	trainerKubeflowVersion = "v1alpha1"
+	clusterTrainingRuntime = "ClusterTrainingRuntime"
 
 	// dependencyCheckInterval is how often to recheck for missing dependencies
 	dependencyCheckInterval = 60 * time.Second
@@ -115,13 +121,30 @@ type TrainerReconciler struct {
 // +kubebuilder:rbac:groups=operator.openshift.io,resources=jobsetoperators,verbs=get;list
 
 func (r *TrainerReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// TODO(RHOAIENG-62940): add Watches for downstream resources to detect drift
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&componentsv1alpha1.Trainer{}).
 		Named("trainer").
 		// Only reconcile when generation changes (spec updates) to avoid
 		// unnecessary reconciliations on status-only updates
 		WithEventFilter(predicates.GenerationChangedPredicate{}).
+		// Watch downstream namespaced resources for drift correction
+		Watches(&appsv1.Deployment{}, handler.EnqueueRequestsFromMapFunc(cluster.EnqueueOwner())).
+		Watches(&corev1.Service{}, handler.EnqueueRequestsFromMapFunc(cluster.EnqueueOwner())).
+		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(cluster.EnqueueOwner())).
+		// Watch ClusterTrainingRuntime (cluster-scoped, external CRD)
+		Watches(
+			&unstructured.Unstructured{},
+			handler.EnqueueRequestsFromMapFunc(cluster.EnqueueOwner()),
+			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+				// Only watch ClusterTrainingRuntime resources
+				gvk := obj.GetObjectKind().GroupVersionKind()
+				return gvk.Group == trainerKubeflowGroup &&
+					gvk.Version == trainerKubeflowVersion &&
+					gvk.Kind == clusterTrainingRuntime
+			})),
+		).
+		// Watch ValidatingWebhookConfiguration (cluster-scoped)
+		Watches(&admissionv1.ValidatingWebhookConfiguration{}, handler.EnqueueRequestsFromMapFunc(cluster.EnqueueOwner())).
 		Complete(r)
 }
 
