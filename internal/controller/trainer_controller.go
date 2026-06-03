@@ -228,7 +228,7 @@ func (r *TrainerReconciler) reconcileManaged(ctx context.Context, trainer *compo
 		return ctrl.Result{}, stderrors.Join(err, r.updateStatus(ctx, trainer, common.PhaseNotReady))
 	}
 
-	if err := r.renderAndApply(ctx, namespace, clusterType); err != nil {
+	if err := r.renderAndApply(ctx, trainer.Name, namespace, clusterType); err != nil {
 		cm.MarkFalse(provisioningCondition, conditions.WithReason("ProvisioningFailed"), conditions.WithError(err))
 		return ctrl.Result{}, stderrors.Join(err, r.updateStatus(ctx, trainer, common.PhaseNotReady))
 	}
@@ -393,8 +393,8 @@ type resourceSet struct {
 	filterConfigMaps bool
 }
 
-func (r *TrainerReconciler) renderAndApply(ctx context.Context, namespace string, clusterType cluster.ClusterType) error {
-	if err := r.renderAndApplyResourceSet(ctx, resourceSet{
+func (r *TrainerReconciler) renderAndApply(ctx context.Context, trainerName, namespace string, clusterType cluster.ClusterType) error {
+	if err := r.renderAndApplyResourceSet(ctx, trainerName, resourceSet{
 		name:         "manifests",
 		subDir:       "manifests",
 		templatePath: r.ManifestsPath,
@@ -405,7 +405,7 @@ func (r *TrainerReconciler) renderAndApply(ctx context.Context, namespace string
 		return fmt.Errorf("applying Trainer manifests: %w", err)
 	}
 
-	if err := r.renderAndApplyResourceSet(ctx, resourceSet{
+	if err := r.renderAndApplyResourceSet(ctx, trainerName, resourceSet{
 		name:             "runtimes",
 		subDir:           "runtimes",
 		templatePath:     r.RuntimesPath,
@@ -416,7 +416,7 @@ func (r *TrainerReconciler) renderAndApply(ctx context.Context, namespace string
 	}
 
 	if clusterType == cluster.ClusterTypeOpenShift {
-		if err := r.renderAndApplyResourceSet(ctx, resourceSet{
+		if err := r.renderAndApplyResourceSet(ctx, trainerName, resourceSet{
 			name:             "imagestreams",
 			subDir:           "imagestreams",
 			templatePath:     r.ImageStreamsPath,
@@ -431,7 +431,7 @@ func (r *TrainerReconciler) renderAndApply(ctx context.Context, namespace string
 	return nil
 }
 
-func (r *TrainerReconciler) renderAndApplyResourceSet(ctx context.Context, rs resourceSet) error {
+func (r *TrainerReconciler) renderAndApplyResourceSet(ctx context.Context, trainerName string, rs resourceSet) error {
 	log := logf.FromContext(ctx)
 
 	workDir := filepath.Join(r.WorkDir, rs.subDir)
@@ -449,7 +449,7 @@ func (r *TrainerReconciler) renderAndApplyResourceSet(ctx context.Context, rs re
 		return fmt.Errorf("resolving %s params: %w", rs.name, err)
 	}
 
-	rendered, err := renderOverlay(renderPath, rs.namespace)
+	rendered, err := renderOverlay(renderPath, rs.namespace, trainerName)
 	if err != nil {
 		return fmt.Errorf("rendering %s: %w", rs.name, err)
 	}
