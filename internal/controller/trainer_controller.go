@@ -154,26 +154,29 @@ func (r *TrainerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			builder.WithPredicates(managedResourcePredicate),
 		)
 
-	// Watch ClusterTrainingRuntime if CRD exists (it may not be installed yet)
+	// Watch ClusterTrainingRuntime (cluster-scoped, external CRD)
+	// Fail fast if CRD doesn't exist - it must be installed before operator starts
 	ctx := context.Background()
 	ctrGVK := schema.GroupKind{
 		Group: trainerKubeflowGroup,
 		Kind:  clusterTrainingRuntime,
 	}
-	if err := cluster.CustomResourceDefinitionExists(ctx, mgr.GetAPIReader(), ctrGVK); err == nil {
-		// CRD exists, add the watch
-		clusterTrainingRuntimeObj := &unstructured.Unstructured{}
-		clusterTrainingRuntimeObj.SetGroupVersionKind(schema.GroupVersionKind{
-			Group:   trainerKubeflowGroup,
-			Version: trainerKubeflowVersion,
-			Kind:    clusterTrainingRuntime,
-		})
-		controllerBuilder = controllerBuilder.Watches(
-			clusterTrainingRuntimeObj,
-			handler.EnqueueRequestsFromMapFunc(cluster.EnqueueOwner()),
-			builder.WithPredicates(managedResourcePredicate),
-		)
+	if err := cluster.CustomResourceDefinitionExists(ctx, mgr.GetAPIReader(), ctrGVK); err != nil {
+		return fmt.Errorf("ClusterTrainingRuntime CRD must be installed before starting the operator: %w", err)
 	}
+
+	// CRD exists, add the watch
+	clusterTrainingRuntimeObj := &unstructured.Unstructured{}
+	clusterTrainingRuntimeObj.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   trainerKubeflowGroup,
+		Version: trainerKubeflowVersion,
+		Kind:    clusterTrainingRuntime,
+	})
+	controllerBuilder = controllerBuilder.Watches(
+		clusterTrainingRuntimeObj,
+		handler.EnqueueRequestsFromMapFunc(cluster.EnqueueOwner()),
+		builder.WithPredicates(managedResourcePredicate),
+	)
 
 	// Watch ValidatingWebhookConfiguration (cluster-scoped)
 	controllerBuilder = controllerBuilder.Watches(
