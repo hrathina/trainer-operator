@@ -41,7 +41,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/opendatahub-io/odh-platform-utilities/api/common"
 	"github.com/opendatahub-io/odh-platform-utilities/pkg/cluster"
@@ -121,30 +120,59 @@ type TrainerReconciler struct {
 // +kubebuilder:rbac:groups=operator.openshift.io,resources=jobsetoperators,verbs=get;list
 
 func (r *TrainerReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Label selector to filter only Trainer-managed resources
+	selector := metav1.LabelSelector{
+		MatchLabels: map[string]string{
+			labels.PlatformPartOf: trainerPartOf,
+		},
+	}
+	labelSelector, err := metav1.LabelSelectorAsSelector(&selector)
+	if err != nil {
+		return fmt.Errorf("failed to create label selector: %w", err)
+	}
+	managedResourcePredicate := predicates.LabelSelectorPredicate{
+		Selector: labelSelector,
+	}
+
+	// Create Unstructured with GVK set for ClusterTrainingRuntime watch
+	clusterTrainingRuntimeObj := &unstructured.Unstructured{}
+	clusterTrainingRuntimeObj.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   trainerKubeflowGroup,
+		Version: trainerKubeflowVersion,
+		Kind:    clusterTrainingRuntime,
+	})
+
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&componentsv1alpha1.Trainer{}).
+		For(&componentsv1alpha1.Trainer{}, builder.WithPredicates(predicates.GenerationChangedPredicate{})).
 		Named("trainer").
-		// Only reconcile when generation changes (spec updates) to avoid
-		// unnecessary reconciliations on status-only updates
-		WithEventFilter(predicates.GenerationChangedPredicate{}).
 		// Watch downstream namespaced resources for drift correction
-		Watches(&appsv1.Deployment{}, handler.EnqueueRequestsFromMapFunc(cluster.EnqueueOwner())).
-		Watches(&corev1.Service{}, handler.EnqueueRequestsFromMapFunc(cluster.EnqueueOwner())).
-		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(cluster.EnqueueOwner())).
+		Watches(
+			&appsv1.Deployment{},
+			handler.EnqueueRequestsFromMapFunc(cluster.EnqueueOwner()),
+			builder.WithPredicates(managedResourcePredicate),
+		).
+		Watches(
+			&corev1.Service{},
+			handler.EnqueueRequestsFromMapFunc(cluster.EnqueueOwner()),
+			builder.WithPredicates(managedResourcePredicate),
+		).
+		Watches(
+			&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(cluster.EnqueueOwner()),
+			builder.WithPredicates(managedResourcePredicate),
+		).
 		// Watch ClusterTrainingRuntime (cluster-scoped, external CRD)
 		Watches(
-			&unstructured.Unstructured{},
+			clusterTrainingRuntimeObj,
 			handler.EnqueueRequestsFromMapFunc(cluster.EnqueueOwner()),
-			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-				// Only watch ClusterTrainingRuntime resources
-				gvk := obj.GetObjectKind().GroupVersionKind()
-				return gvk.Group == trainerKubeflowGroup &&
-					gvk.Version == trainerKubeflowVersion &&
-					gvk.Kind == clusterTrainingRuntime
-			})),
+			builder.WithPredicates(managedResourcePredicate),
 		).
 		// Watch ValidatingWebhookConfiguration (cluster-scoped)
-		Watches(&admissionv1.ValidatingWebhookConfiguration{}, handler.EnqueueRequestsFromMapFunc(cluster.EnqueueOwner())).
+		Watches(
+			&admissionv1.ValidatingWebhookConfiguration{},
+			handler.EnqueueRequestsFromMapFunc(cluster.EnqueueOwner()),
+			builder.WithPredicates(managedResourcePredicate),
+		).
 		Complete(r)
 }
 
