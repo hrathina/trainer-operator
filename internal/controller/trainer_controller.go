@@ -134,15 +134,7 @@ func (r *TrainerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Selector: labelSelector,
 	}
 
-	// Create Unstructured with GVK set for ClusterTrainingRuntime watch
-	clusterTrainingRuntimeObj := &unstructured.Unstructured{}
-	clusterTrainingRuntimeObj.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   trainerKubeflowGroup,
-		Version: trainerKubeflowVersion,
-		Kind:    clusterTrainingRuntime,
-	})
-
-	return ctrl.NewControllerManagedBy(mgr).
+	controllerBuilder := ctrl.NewControllerManagedBy(mgr).
 		For(&componentsv1alpha1.Trainer{}, builder.WithPredicates(predicates.GenerationChangedPredicate{})).
 		Named("trainer").
 		// Watch downstream namespaced resources for drift correction
@@ -160,20 +152,37 @@ func (r *TrainerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&corev1.ConfigMap{},
 			handler.EnqueueRequestsFromMapFunc(cluster.EnqueueOwner()),
 			builder.WithPredicates(managedResourcePredicate),
-		).
-		// Watch ClusterTrainingRuntime (cluster-scoped, external CRD)
-		Watches(
+		)
+
+	// Watch ClusterTrainingRuntime if CRD exists (it may not be installed yet)
+	ctx := context.Background()
+	ctrGVK := schema.GroupKind{
+		Group: trainerKubeflowGroup,
+		Kind:  clusterTrainingRuntime,
+	}
+	if err := cluster.CustomResourceDefinitionExists(ctx, mgr.GetAPIReader(), ctrGVK); err == nil {
+		// CRD exists, add the watch
+		clusterTrainingRuntimeObj := &unstructured.Unstructured{}
+		clusterTrainingRuntimeObj.SetGroupVersionKind(schema.GroupVersionKind{
+			Group:   trainerKubeflowGroup,
+			Version: trainerKubeflowVersion,
+			Kind:    clusterTrainingRuntime,
+		})
+		controllerBuilder = controllerBuilder.Watches(
 			clusterTrainingRuntimeObj,
 			handler.EnqueueRequestsFromMapFunc(cluster.EnqueueOwner()),
 			builder.WithPredicates(managedResourcePredicate),
-		).
-		// Watch ValidatingWebhookConfiguration (cluster-scoped)
-		Watches(
-			&admissionv1.ValidatingWebhookConfiguration{},
-			handler.EnqueueRequestsFromMapFunc(cluster.EnqueueOwner()),
-			builder.WithPredicates(managedResourcePredicate),
-		).
-		Complete(r)
+		)
+	}
+
+	// Watch ValidatingWebhookConfiguration (cluster-scoped)
+	controllerBuilder = controllerBuilder.Watches(
+		&admissionv1.ValidatingWebhookConfiguration{},
+		handler.EnqueueRequestsFromMapFunc(cluster.EnqueueOwner()),
+		builder.WithPredicates(managedResourcePredicate),
+	)
+
+	return controllerBuilder.Complete(r)
 }
 
 func (r *TrainerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
