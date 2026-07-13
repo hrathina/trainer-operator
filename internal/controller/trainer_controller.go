@@ -83,6 +83,7 @@ type componentMetadata struct {
 
 type TrainerReconciler struct {
 	client.Client
+	APIReader        client.Reader
 	Scheme           *runtime.Scheme
 	ManifestsPath    string
 	RuntimesPath     string
@@ -185,10 +186,6 @@ func (r *TrainerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 
-	if trainer.GetManagementState() == common.Removed {
-		return r.reconcileRemoved(ctx, trainer)
-	}
-
 	return r.reconcileManaged(ctx, trainer)
 }
 
@@ -261,22 +258,6 @@ func (r *TrainerReconciler) reconcileManaged(ctx context.Context, trainer *compo
 	cm.MarkTrue(provisioningCondition, conditions.WithReason("Provisioned"), conditions.WithMessage("Trainer resources provisioned successfully"))
 
 	return ctrl.Result{}, r.updateStatus(ctx, trainer, common.PhaseReady, platformVersion)
-}
-
-func (r *TrainerReconciler) reconcileRemoved(ctx context.Context, trainer *componentsv1alpha1.Trainer) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
-	log.Info("Trainer is marked as Removed, cleaning up managed resources")
-
-	cm := newConditionManager(trainer)
-
-	if err := r.runGC(ctx, trainer); err != nil {
-		cm.MarkFalse(provisioningCondition, conditions.WithReason("CleanupFailed"), conditions.WithError(err))
-		return ctrl.Result{}, stderrors.Join(err, r.updateStatus(ctx, trainer, common.PhaseNotReady, ""))
-	}
-
-	cm.MarkFalse(provisioningCondition, conditions.WithReason("Removed"), conditions.WithMessage("Trainer has been removed"))
-
-	return ctrl.Result{}, r.updateStatus(ctx, trainer, common.PhaseNotReady, "")
 }
 
 func (r *TrainerReconciler) reconcileDelete(ctx context.Context, trainer *componentsv1alpha1.Trainer) (ctrl.Result, error) {
@@ -593,7 +574,7 @@ func (r *TrainerReconciler) ensureNamespace(ctx context.Context, name string) er
 
 func (r *TrainerReconciler) getPlatformVersion(ctx context.Context, namespace string) (string, error) {
 	cm := &corev1.ConfigMap{}
-	if err := r.Get(ctx, client.ObjectKey{Name: platformConfigMapName, Namespace: namespace}, cm); err != nil {
+	if err := r.APIReader.Get(ctx, client.ObjectKey{Name: platformConfigMapName, Namespace: namespace}, cm); err != nil {
 		if errors.IsNotFound(err) {
 			return "", nil
 		}
