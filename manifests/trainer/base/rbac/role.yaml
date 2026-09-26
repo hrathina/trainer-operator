@@ -59,11 +59,17 @@ rules:
   - update
   - watch
 - apiGroups:
-  - config.openshift.io
+  - authentication.k8s.io
   resources:
-  - apiservers
+  - tokenreviews
   verbs:
-  - get
+  - create
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
 - apiGroups:
   - coordination.k8s.io
   resources:

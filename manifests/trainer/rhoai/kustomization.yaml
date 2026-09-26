@@ -10,17 +10,19 @@ configMapGenerator:
 - name: rhoai-config
   envs:
     - params.env
+- name: kubeflow-trainer-config
+  behavior: replace
+  files:
+    - controller_manager_config.yaml
 
 configurations:
 - params.yaml
 
 replacements:
-# Replace NAMESPACE placeholder in ServiceMonitor serverName with the operator namespace
 - source:
-    kind: ConfigMap
-    name: rhoai-config
-    version: v1
-    fieldPath: data.operator-namespace
+    kind: Service
+    name: kubeflow-trainer-controller-manager
+    fieldPath: metadata.namespace
   targets:
   - select:
       kind: ServiceMonitor
@@ -57,8 +59,8 @@ resources:
 - ../base/webhook
 # - ../third-party/jobset #uncomment if jobset should be bundled under kubeflow trainer controller manager
 - kubeflow-training-roles.yaml
-- monitor.yaml
 - rbac/tls
+- monitor.yaml
 
 secretGenerator:
   - name: kubeflow-trainer-webhook-cert
@@ -69,19 +71,10 @@ patches:
 # Mount the controller config file for loading manager configurations
 # through a ComponentConfig type
 - path: manager_config_patch.yaml
-- path: manager_metrics_patch.yaml
 # RHAI-specific RBAC for progression tracking
 - path: rbac_progression_patch.yaml
   target:
     group: rbac.authorization.k8s.io
     version: v1
     kind: ClusterRole
-    name: kubeflow-trainer-controller-manager
-- patch: |-
-    - op: remove
-      path: /spec/ports/0
-  target:
-    group: ""
-    version: v1
-    kind: Service
     name: kubeflow-trainer-controller-manager
