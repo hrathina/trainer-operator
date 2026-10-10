@@ -1,4 +1,4 @@
-# Copyright The Kubeflow Authors.
+# Copyright 2026 The Kubeflow Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,10 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-resources:
-  - trainer.kubeflow.org_clustertrainingruntimes.yaml
-  - trainer.kubeflow.org_optimizationjobs.yaml
-  - trainer.kubeflow.org_trainingruntimes.yaml
-  - trainer.kubeflow.org_trainjobs.yaml
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kubeflow-trainer-controller-manager-egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: trainer
+      app.kubernetes.io/component: manager
+      app.kubernetes.io/part-of: kubeflow
+  policyTypes:
+    - Egress
+  egress:
+    # The controller requires unrestricted egress for Kubernetes API access.
+    - {}
